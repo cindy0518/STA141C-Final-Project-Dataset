@@ -1,0 +1,426 @@
+---
+title: "STA141C-Final Project"
+author: "Shih-Chi Chen"
+date: "2/27/2022"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r}
+#read the data
+A<- read.csv("~/Downloads/STA141C- matrix - A matrix.csv", header=FALSE)
+U<- read.csv("~/Downloads/STA141C- matrix - U matrix.csv", sep="")
+```
+
+### Summary of matirx A
+
+How many pages?
+```{r}
+dim(A)[1]
+```
+
+How many edges (page links)?
+```{r}
+sum(A)
+```
+
+How many dangling nodes (pages with no out links)?
+```{r}
+#find the dangling nodes
+dangling=rowSums(A) == 0
+#count all true values
+sum(dangling)
+```
+
+Which page has max in-degree?
+
+```{r}
+indeg =colSums(A)
+idxideg =which.max(indeg)
+U[idxideg,]
+```
+
+Which page has max out-degree?
+```{r}
+outdeg <- rowSums(A)
+idxodeg <- which.max(outdeg)
+outdeg[idxodeg]
+U[idxodeg,]
+```
+
+Graph of matrix A
+```{r}
+##set A as a matrix 
+A=as.matrix(A)
+image(A, col = c("white", "black"))
+```
+#### Text Mining
+
+### Row stochastic matrix (Query Problem) : Power Iteration
+
+Since there are some dangling nodes we try to use row stochastic matrix for find the largest eigenvalue and its eigenvector by power method.
+
+```{r}
+A=as.matrix(A)
+
+z=matrix(c(NA),nrow=45,ncol=45)
+rsm=function (X) {
+  for(i in 1:nrow(z)) {
+    if (rowSums(X)[i]> 0){
+      z[i,]=(X[i,]/rowSums(X)[i])
+     } else {
+         z[i,]=(1/nrow(z))
+     }
+  }
+  z
+}
+
+rowstom=rsm(A)
+```
+
+
+```{r}
+##function of Iterative eigen-solver (input rowstom')
+
+iteration = function(A) {
+  
+  matrixdim = dim(A)[1]
+  
+  #create the list to input the q vector
+  q = list()
+  #initial guess of q^0 
+  q[[1]] = matrix(c(rep(1 / matrixdim, matrixdim)), nrow = matrixdim)
+  
+  #iterative q^k and q^(k-1) by using q^k=Aq^(k-1)/norm(Aq^(k-1))
+  for (i in 1:10000) {
+    #here we using i+1 instead of i because the first position in q is initial value
+    q[[i + 1]] = A %*% q[[i]] / norm(A %*% q[[i]], type = c("2"))
+    #length for q^k and q^(k-1)
+    length_x = norm(q[[i + 1]] - q[[i]], type = c("2"))
+    
+    #condition for return value of q^k, lambda, iteration times 
+    #when length_x<= tolerance 10^-6
+    if (10 ^ -6 >= length_x) {
+      eigenvector_q=q[[i+1]]
+      lamdba = t(q[[i + 1]]) %*% A %*% q[[i]]
+      return(list(times=length(q) - 1,lamdba=lamdba,eigenvector_q=eigenvector_q))
+    }
+  }
+}
+
+runtime_eigen<-system.time(try_iteration<-iteration(t(rowstom)))
+eigenvector_pw=(try_iteration$eigenvector_q)/sum(try_iteration$eigenvector_q)
+eigenvector_pw
+```
+
+Here are some query which we interesting:
+
+1. Covid-19 
+2. California
+3. phone
+4. Mortgage Rates
+5. Ukraine
+6. Russian
+
+Inverted term-document:
+
+Term 'Covid-19':1,2,5,6,12,15,18,19,22,26,42,44
+Term 'California':1,12,14,18,26,27,28,29,34,38
+Term 'phone':1,4,5,7,8,10,19,27,29,37,43,45
+Term 'Mortgage Rates':1,39,45
+Term 'Ukraine':1,2,3,4,5,15,16,18,19,26,39,42,44
+Term 'Russian':1,2,3,4,5,16,18,19,26,42,44
+
+If we want to find term 'Ukraine' and 'Russian', the relevancy set for a query on terms “Ukraine” and “Russian” is 1,2,3,4,5,15,16,18,19,26,39,42,44
+
+Then, check their Pagerank values $\pi_1,\pi_2,\pi_3,\pi_4,\pi_5,\pi_{15},\pi_{16},\pi_{18},\pi_{19},\pi_{26},\pi_{39},\pi_{42},\pi_{44}$ and sort them in the increasing order to
+get: 15,18,1,3,4,5,2,26,39,19,16,42,44
+
+```{r}
+eigenvector_pw[1]
+eigenvector_pw[2]
+eigenvector_pw[3]
+eigenvector_pw[4]
+eigenvector_pw[5]
+eigenvector_pw[15]
+eigenvector_pw[16]
+eigenvector_pw[18]
+eigenvector_pw[19]
+eigenvector_pw[26]
+eigenvector_pw[39]
+eigenvector_pw[42]
+eigenvector_pw[44]
+```
+
+Consequently, webpage 15 is the most important among the relevant webpages followed by webpage 18,1,3,4,5,2,26,39,19,16,42,44.
+
+```{r}
+U[c(15,18,1,3,4,5,2,26,39,19,16,42,44), ]
+```
+
+### Term document matrix (Query Problems) : d=q’T
+
+If the user want to find search for 'Ukraine' and 'Russian', the query vector $$q=\begin{bmatrix} 0 \\0 \\0\\0\\1\\1\end{bmatrix}$$
+
+In order to determine which webpages are responsive to the query, we compute $d=q^TT$
+
+The entries in d =0 means that there is no keyword appears in that webpages.
+The entries in d =1 means that there is only one keyword appears ( Ukraine or Russian ) in that webpages.
+The entries in d =2 means that both two keywords ( Ukraine and Russian ) appear in that webpages.
+
+Therefore, if the user wants to nd both two keywords, he/she should choose webpages 1,2,3,4,5,16,18,19,26,42,44.
+
+```{r}
+#read term document matrix T
+term.document <- read.csv("~/Downloads/STA141C/term-document.csv", header=FALSE)
+term.document=as.matrix(term.document)
+
+#set query vector
+q=matrix(c(0,0,0,0,1,1),nrow=6)
+#calculate d=q’T
+d=crossprod(q,term.document)
+d
+```
+
+According to the rank by using Pagerank method previously, 18 and 1 should be listed on the first rank and the second rank, respectively. Then the rest of rank are 3,4,5,2,26,19,16,42,44.
+```{r}
+U[c(18,1,3,4,5,2,26,19,16,42,44), ]
+```
+
+Compare two text mining methods:
+From above result, it shows that a little different rank on both methods. For example, the top one website for user search for 'Ukraine' and 'Russian' is https://search.yahoo.com/search?p=Winter+Olympics&fr=fp-tts&fr2=p:fp,m:tn,ct:all,kt:org,pg:1,stl:crsl,b: (Webpage15) when we use row stochastic matrix for power Iteration. However, if we use Term document matrix to calculate it, it shows that the top one website is https://facebook.com/yahoo (Webpage18). Since Webpage15 only show one term in the webpage, it will not rank on top. Therefore, by using Term document matrix method seems make users can find more relevant sites which they are want to search.
+
+#### HITS Method: Power Iteration
+
+$a_0=h_0=(1/45,1/45,1/45,1/45,....1/45)$
+$k=1$
+Repeat
+ $a^{(k)}=L^TLa^{(k-1)}$
+ $h^{(k)}=LL^Th^{(k-1)}$
+ $a^{(k)}=a^{(k)}/||a^{(k)}||_1}$ normalization
+ $h^{(k)}=h^{(k)}/||h^{(k)}||_1}$ normalization
+ k=k+1
+until $||a^{(k)}-a^{(k-1)}||<10^{-6}$ and $||h^{(k)}-h^{(k-1)}||<10^{-6}$
+return  $a^{(k)}$ and $h^{(k)}$
+
+
+Power Iteration for computing the dominant eigenvector (Authority Rank):
+
+$a^{(k)}=L^TLa^{(k-1)}$ (1)
+
+Power Iteration forcomoputing the dominant eigenvector (Hub Rank):
+
+$h^{(k)}=LL^Th^{(k-1)}$ (2)
+
+In above the HITS algorithm (1) (as well as (2)), we normalize these vector after each iteration to have $||a^{(k)}||=1$ and  $||h^{(k)}||=1$ The most convenient norm is 1-norm in this case. In addition, setting tolerance =$10^{-6}$.
+
+From the authority rank, it shows that webpages https://news.yahoo.com/ (webpage2) has the highest scores in authority. The good authority webpage is linked from the good hub webpage. It is found that the highest authority webpage2 is linked from the high hub webpage https://www.yahoo.com/ (webpage1) and https://news.yahoo.com/coronavirus/ (webpage12) while the second highest authority webpage https://sports.yahoo.com/ (webpage4) is linked from the high hub webpage1 and webpage12 as well.
+
+Therefore, webpages and have greater chances for performing well on search engine page results. From the rank of term previously, it is also found that both keywords “Ukraine” and “Russian” are in the webpages2 and webpage4.
+
+```{r}
+##Authority Ranking
+auth=iteration(crossprod(A))
+
+#largest eigenvalue's eigenvector
+eigenvector_auth=auth$eigenvector_q
+
+#iteration times
+auth$times
+
+## Rank url for HITS (Authority)
+#rank the x vector from large to small
+rank=sort(eigenvector_auth,index.return=TRUE, decreasing=TRUE)
+
+#select top 20 URL
+top20=rank$ix[1:20]
+
+#create matrix to url list
+name_url_auth=matrix(c(NA),nrow=20)
+
+#connect two matrix by using for loop and print top20
+for (i in 1:20){
+  name_url_auth[i,]=U[rank$ix[i],]
+   
+}
+
+#rank url for HITS (Authority)
+name_url_auth
+```
+
+```{r}
+##Hub Ranking
+hub=iteration(tcrossprod(A))
+
+#largest eigenvalue's eigenvector
+eigenvector_hub=hub$eigenvector_q
+
+#iteration times
+hub$times
+
+## Rank url for HITS (Hub)
+#rank the x vector from large to small
+rank=sort(eigenvector_hub,index.return=TRUE, decreasing=TRUE)
+
+#select top 20 URL
+top20=rank$ix[1:20]
+
+#create matrix to url list
+name_url_hub=matrix(c(NA),nrow=20)
+
+#connect two matrix by using for loop and print top20
+for (i in 1:20){
+  name_url_hub[i,]=U[rank$ix[i],]
+   
+}
+
+#rank url for HITS (Hub)
+name_url_hub
+```
+
+
+### solve (In-P')x = 0n 
+##construct the P matrix
+```{r}
+A=as.matrix(A)
+##r+ matrix
+#ri=p/ri if ri > 0 ; otherwise ri=0
+r_plus=0.85/diag(rowSums(A))
+#set the inf number to 0
+r_plus[which(!is.finite(r_plus))] = 0 
+
+##Z vector
+z=matrix(c(NA),nrow=45)
+
+for(i in 1:45) {
+  #zi=(1-p)/n if ri > 0
+  if (rowSums(A)[i]> 0){
+        z[i,]=(0.15/45)
+  #zi=1/n otherwise
+    } else {
+        z[i,]=(1/45)
+    }
+}
+
+#I matrix
+i_45=as.matrix(c(rep(1, 45)),nrow=45)
+
+#P matrix
+P=r_plus%*%A+z%*%t(i_45)
+```
+
+## LU decomposition
+```{r}
+#solve (In-P')x = 0n by using LU decomposition
+solve_a=diag(45)-t(P)
+b=as.matrix(c(1,rep(0, 44)),nrow=45) 
+solve_a[1,]=c(rep(1, 45))
+```
+
+```{r}
+# Load LU.R function 
+source("/Users/chang/Downloads/STA141C/LU function.R")
+lu_page=lu_function(solve_a, b)
+timing.lu <- system.time(lu_function(solve_a, b))
+timing.lu
+```
+
+```{r}
+## Rank url for lu solver method
+tp20_index <- order(lu_page$coefficients, decreasing = TRUE)[1:20]
+U[tp20_index,]
+```
+
+## QR decomposition
+
+```{r}
+# Load QR.R function 
+source("/Users/chang/Downloads/STA141C/QR_function.R")
+qr_page=qr_function(solve_a, b)
+timing.qr <- system.time(qr_function(solve_a, b))
+timing.qr
+```
+
+```{r}
+## Rank url for qr solver method
+tp20_index <- order(qr_page$coefficients, decreasing = TRUE)[1:20]
+U[tp20_index,]
+```
+
+## SVD 
+
+```{r}
+# Load SVD.R function 
+source("/Users/chang/Downloads/STA141C/SVD_function.R")
+svd_page=svd_function(solve_a, b)
+timing.svd <- system.time(svd_function(solve_a, b))
+timing.svd
+```
+
+
+```{r}
+## Rank url for svd solver method
+tp20_index <- order(svd_page$coefficients, decreasing = TRUE)[1:20]
+U[tp20_index,]
+```
+
+## Eigen iteration
+
+```{r}
+# Load eigen iteration.R function 
+source("/Users/chang/Downloads/STA141C/eigen_iteration.R")
+#input P'
+eigen_page=literation(t(P))
+timing.eigen <- system.time(literation(t(P)))
+timing.eigen
+
+#times
+eigen_page$times
+
+#lambda
+eigen_page$lamdba
+
+#eigenvector
+eigenvector_pw=eigen_page$eigenvector_q
+```
+
+```{r}
+## Rank url for eigen solver method
+tp20_index <- order(eigenvector_pw, decreasing = TRUE)[1:20]
+U[tp20_index,]
+```
+
+
+## Jacobi iteration
+
+```{r}
+# Load jac.R function 
+source("/Users/chang/Downloads/STA141C/jac_iter.R")
+jac_page=Jac_iter(A, maxiter = 1000,tolx = 1e-3)
+timing.jac <- system.time(Jac_iter(A, maxiter = 1000,tolx = 1e-3))
+timing.jac
+```
+
+```{r}
+#The top 20 URLS according to the jacobi values:
+tp20_index <- order(jac_page, decreasing = TRUE)[1:20]
+U[tp20_index,]
+```
+
+## Gauss iteration
+
+```{r}
+# Load gauss.R function 
+source("/Users/chang/Downloads/STA141C/gauss_iter.R")
+gauss_page=gauss_literation(A, telep = 0.85,  maxiter = 100,tolx = 1e-3)
+timing.gau <- system.time(gauss_literation(A, telep = 0.85,  maxiter = 100,tolx = 1e-3))
+timing.gau
+```
+
+```{r}
+#The top 20 URLS according to the gauss values:
+tp20_index_g <- order(gauss_page, decreasing = TRUE)[1:20]
+U[tp20_index_g,]
+```
+

@@ -1,0 +1,352 @@
+---
+title: "Untitled"
+author: "Shih-Chi Chen"
+date: "3/13/2022"
+output:
+  word_document: default
+  html_document: default
+---
+
+### Simulation study 
+
+Let’s simulate the following linear model:
+$y_i=\beta_0+\beta_1x_{i1}+\beta_2x_{i2}+\epsilon_i$
+where i=1,2,3,....,100  
+$\epsilon_i~N(0,\sigma^2)$,and $\sigma^2=4$
+
+First, create the vector of Y. 
+The parameters are set as $\beta=\begin{bmatrix} 10 \\2 \\0.5\end{bmatrix}$
+$n=1000, \sigma=2$
+
+```{r}
+set.seed(001)
+n = 1000; p = 2; sigma = 4;
+
+# Betas
+b0 = 10
+b1 = 2
+b2 = 0.5
+beta = c(b0, b1,b2)
+
+# Xs
+x1 = runif(n, 0, 10)
+x2 = rnorm(n, mean = 4, sd = 10)
+xmat = cbind(rep(1,n), x1, x2)
+
+# errors
+eps = rnorm(n,0,sigma)
+
+# calculate Y using linear model
+y = xmat %*% beta + eps
+
+#bind data
+df_lm = as.data.frame(cbind(y,xmat))
+colnames(df_lm) = c("y", "intercept", "x1", "x2")
+head(df_lm)
+```
+Estimated the $\beta$ and $\epsilon$
+
+The $\beta_s$ can be calculated through two ways: using formulas and using R function.
+
+```{r}
+##sample
+# Using formula
+beta_form = qr.solve(crossprod(xmat)) %*% crossprod(xmat,y)
+
+compare = cbind(beta_form, beta)
+colnames(compare)= c("formula", "actual")
+compare
+```
+
+#LU simulation
+The original sigma^2 is 16 and the realized value is 17.76159
+```{r}
+#LU Simulation
+library(Matrix)
+lu_function <- function (X, y) {
+  XX <- crossprod(X)
+  XX.lu <- expand(lu(XX))
+  L <- XX.lu$L
+  U <- XX.lu$U
+  P <- XX.lu$P
+  bs <- forwardsolve(L, crossprod(P, crossprod(X, y)))
+  betahat <- backsolve(U, bs)
+  
+  #sigma^2 hat
+  sigma2hat=crossprod(y - (X) %*% betahat) / (dim(X)[1] - dim(X)[2]-1)
+  
+   #return answer
+  list(coefficients = betahat, sigma_sqr = sigma2hat)
+}
+
+#compare table
+lu_sim=lu_function(xmat,y)
+compare = cbind(lu_sim$coefficients, beta)
+colnames(compare)= c("formula", "actual")
+compare
+
+#sigma^2 hat
+lu_sim$sigma_sqr
+```
+
+#qr simulation
+```{r}
+#QR Simulation 
+
+qr_function <- function (X, y) {
+  #  Get Q and R matrix for X matrix
+  qr_mat=qr(X)
+  Q_mat <- qr.Q(qr_mat)
+  R_mat <- qr.R(qr_mat)
+  
+  # Solve Rb = Q'y to get the all beta values
+  betahat <- as.vector(backsolve(R_mat, crossprod(Q_mat, y)))
+  
+  # sigma^2 hat
+  sigma2hat=crossprod(y - (X) %*% betahat) / (dim(X)[1] - dim(X)[2]-1)
+  
+  # return answer
+  list(coefficients = betahat, sigma_sqr = sigma2hat)
+}
+
+
+#compare table
+qr_sim=qr_function(xmat,y)
+compare = cbind(qr_sim$coefficients, beta)
+colnames(compare)= c("formula",  "actual")
+compare
+
+#sigma^2 hat
+qr_sim$sigma_sqr
+```
+
+#svd simulation
+```{r}
+#SVD decomposition Simulation
+svd_function <- function (X, y) {
+  
+  #  Get svd for X matrix
+  svd_mat=svd(X)
+  svd_sing=svd_mat$d
+  U_mat <- svd_mat$u
+  V_mat <- svd_mat$v
+  
+  # Solve x = V*(1/d)*u'*y to get the all beta values
+  betahat <- as.vector(V_mat%*%diag(1/(svd_sing))%*%t(U_mat)%*%y)
+  
+  # sigma^2 hat
+  sigma2hat=crossprod(y - (X) %*% betahat) / (dim(X)[1] - dim(X)[2]-1)
+  
+  # return answer
+  list(coefficients = betahat, sigma_sqr = sigma2hat)
+}
+
+#compare table
+svd_sim=svd_function(xmat,y)
+compare = cbind(svd_sim$coefficients, beta)
+colnames(compare)= c("formula",  "actual")
+compare
+
+#sigma^2 hat
+svd_sim$sigma_sqr
+```
+
+#eigen simulation
+```{r}
+#create the adjacent matrix A matrix and force it to Symmetric
+set.seed(1)
+A_adj=matrix(rbinom(n = 10000, size = 1, prob = 0.5),nrow=100)
+A_sim=forceSymmetric(A_adj)
+
+##r+ matrix
+#ri=p/ri if ri > 0 ; otherwise ri=0
+r_plus=0.85/diag(rowSums(A_sim))
+#set the inf number to 0
+r_plus[which(!is.finite(r_plus))] = 0 
+
+##Z vector
+z=matrix(c(NA),nrow=100)
+
+for(i in 1:100) {
+  #zi=(1-p)/n if ri > 0
+  if (rowSums(A_sim)[i]> 0){
+        z[i,]=(0.15/100)
+  #zi=1/n otherwise
+    } else {
+        z[i,]=(1/100)
+    }
+}
+
+#I matrix
+i_100=as.matrix(c(rep(1, 100)),nrow=100)
+
+#P matrix
+P=r_plus%*%A_sim+z%*%t(i_100)
+
+eigen_r=eigen(t(P))
+
+#rank of eigen_r 
+order(eigen_r$vectors[,1],decreasing = TRUE)
+```
+
+```{r}
+##function of Iterative eigen-solver on A matrix (power iteration) Simulation
+
+literation = function(A) {
+  
+  matrixdim = dim(A)[1]
+  
+  #create the list to input the q vector
+  q = list()
+  #initial guess of q^0 
+  q[[1]] = matrix(c(rep(1 / matrixdim, matrixdim)), nrow = matrixdim)
+  
+  #iterative q^k and q^(k-1) by using q^k=Aq^(k-1)/norm(Aq^(k-1))
+  for (i in 1:10000) {
+    #here we using i+1 instead of i because the first position in q is initial value
+    q[[i + 1]] = A %*% q[[i]] / norm(A %*% q[[i]], type = c("2"))
+    #length for q^k and q^(k-1)
+    length_x = norm(q[[i + 1]] - q[[i]], type = c("2"))
+    
+    #condition for return value of q^k, lambda, iteration times 
+    #when length_x<= tolerance 10^-6
+    if (10 ^ -3 >= length_x) {
+      eigenvector_q=q[[i+1]]
+      lamdba = t(q[[i + 1]]) %*% A %*% q[[i]]
+      return(list(times=length(q) - 1,lamdba=lamdba,eigenvector_q=eigenvector_q))
+    }
+  }
+}
+Asimlit=literation(t(P))
+
+#rank of Asimlit 
+order(Asimlit$eigenvector_q,decreasing = TRUE)
+```
+
+```{r}
+#compare table for eigen solver (power iteration) the largest lamdba
+compare_lam = cbind(Asimlit$lamdba,eigen_r$values[1])
+colnames(compare_lam)= c("formula", "actual")
+compare_lam
+
+```
+
+```{r}
+#compare table for eigen solver (power iteration) the eigenvector
+compare_vector = cbind(Asimlit$eigenvector_q,abs(eigen_r$vectors[,1]))
+colnames(compare_vector)= c("formula", "actual")
+compare_vector
+
+#distance between two vectors
+norm(Asimlit$eigenvector_q-abs(eigen_r$vectors[,1]),type="2")
+```
+
+```{r}
+#jacobi Simulation
+
+jac_literation = function(A, telep = 0.85,  maxiter = 1000,
+                     tolx = 1e-3) {
+  n<- dim(A_sim)[1]
+  ##REFERENCE STA 141C HW-2 Notes:
+  A_sparse <- Matrix(A_sim, sparse = TRUE)
+  outd_s <- rowSums(A_sparse)
+  outdinv_s <- ifelse(outd_s > 0, telep / outd_s, 0)
+  z <- ifelse(outd_s > 0, 1 - telep, 1) / n
+  # G is the R^+ A matrix
+  G <- outdinv_s * A_sparse
+  #set the initial vector 
+  x = rep(1 / n, n)
+  #b from Ax = b:
+  bi = x
+  #Diagonal of the Matrix:
+  aii <- 1 - diag(G) - z
+  
+  ###JACOBI METHOD:
+  ##-------------------
+  x = rep(1 / n, n)
+  #b from Ax = b:
+  bi = x
+  #Diagonal of the Matrix:
+  aii <- 1 - diag(G) - z
+  start.time <- Sys.time()
+  for (iter in 1:maxiter) {
+    bi <- x
+    # (I - P^T)x
+    Jacobi_dec <- x - x %*% G - sum(x * z)
+    # Jacobi update
+    x <- bi - Jacobi_dec / aii
+    #stop when the length of two vectors < tolx
+    if (sum(abs(x - bi)) < tolx)
+      break
+    }
+    if (iter == maxiter) {
+      warning(paste("fail to converge in", maxiter, " iterations!"))
+    } else {
+      print(paste("converged in", iter, "iterations"))
+    }
+    #normalize
+    pgrank <- abs(x / sum(x))
+  # output
+  return(pgrank)
+  }
+#Pagerank values for Jacobi:
+jc_pgrank <- jac_literation(A_sim, telep = 0.85,  maxiter = 1000,tolx = 1e-3)
+
+#Runtime Calculation:
+timing.jcb <- system.time(jac_literation(A_sim, telep = 0.85,  maxiter = 1000,tolx = 1e-3))
+
+#The top 20 URLS according to the pagerank values:
+tp20_index_jc <- order(jc_pgrank,decreasing = TRUE)[1:20]
+tp20_index_jc
+```
+
+```{r}
+#gauss Simulation
+gauss_literation = function(A, telep = 0.85,  maxiter = 1000,
+                     tolx = 1e-3) {
+  n<- dim(A)[1]
+  ##REFERENCE STA 141C HW-2 Notes:
+  A=as.matrix(A)
+  A_sparse <- Matrix(A, sparse = TRUE)
+  outd_s <- rowSums(A_sparse)
+  outdinv_s <- ifelse(outd_s > 0, telep / outd_s, 0)
+  z <- ifelse(outd_s > 0, 1 - telep, 1) / n
+  # G is the R^+ A matrix
+  G <- outdinv_s * A_sparse
+  #set the initial vector 
+  x0 = rep(1 / n, n)
+  #b from Ax = b:
+  bi = x0
+  #Diagonal of the Matrix:
+  aii <- 1 - diag(G) - z
+  k = 1
+  while(k < maxiter){
+  x = x0
+  Gauss_dec <- bi - x0 %*% G - sum(x * z)
+  x <- bi - Gauss_dec / aii
+  if (any(abs(x - x0) < tolx)){
+    gs_pgrank<- x
+    break
+    }
+  k = k +1
+
+  for (iter in 1: maxiter){
+    x0 = x
+   }
+  }
+  x0 = x
+  #normalize
+  gs_pgrank <- abs(x0 / sum(x0))
+  #output
+  return(gs_pgrank)
+}
+
+gauss_liter=gauss_literation(A_sim, telep = 0.85,  maxiter = 1000,tolx = 1e-3)
+
+#Runtime Calculation:
+timing.gauss <- system.time(gauss_literation(A_sim, telep = 0.85,  maxiter = 1000,tolx = 1e-3))
+
+#rank top 20
+tp20_index_gs <- order(gauss_liter, decreasing = TRUE)[1:20]
+tp20_index_gs
+```
